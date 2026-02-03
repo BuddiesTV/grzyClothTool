@@ -338,12 +338,8 @@ namespace grzyClothTool.Controls
                 var originalPath = textBox.OriginalSelectedPath;
                 if (!string.IsNullOrEmpty(originalPath) && File.Exists(originalPath))
                 {
-                    var relativePath = await HandleSpecialFilePath(args.UpdatedName, originalPath);
+                    await HandleSpecialFilePath(args.UpdatedName, originalPath);
                     textBox.OriginalSelectedPath = string.Empty;
-                    if (!string.IsNullOrEmpty(relativePath))
-                    {
-                        textBox.Text = relativePath;
-                    }
                     return;
                 }
             }
@@ -374,46 +370,56 @@ namespace grzyClothTool.Controls
         }
 
         /// <summary>
-        /// Handles special file paths (FirstPersonPath, ClothPhysicsPath) by copying them to project assets
-        /// using the main drawable's GUID with a suffix (e.g., "_firstperson" or "_cloth").
+        /// Handles special file paths (FirstPersonPath, ClothPhysicsPath) by either copying them to project assets
+        /// or using the original path directly, depending on whether the project is external or self-contained.
+        /// Sets the appropriate property on SelectedDraw which will update the UI binding.
         /// </summary>
-        /// <returns>The relative path of the copied file, or null if failed.</returns>
-        private async Task<string?> HandleSpecialFilePath(string propertyName, string sourceFilePath)
+        private async Task HandleSpecialFilePath(string propertyName, string sourceFilePath)
         {
             try
             {
                 if (SelectedDraw == null)
                 {
                     LogHelper.Log($"Cannot process {propertyName}: No drawable selected", LogType.Warning);
-                    return null;
+                    return;
                 }
 
-                string suffix = propertyName switch
-                {
-                    "FirstPersonPath" => "_firstperson",
-                    "ClothPhysicsPath" => "_cloth",
-                    _ => throw new ArgumentException($"Unknown property: {propertyName}")
-                };
+                string finalPath;
 
-                var fileNameWithoutExtension = $"{SelectedDraw.Id}{suffix}";
-                var relativePath = await FileHelper.CopyToProjectAssetsWithReplaceAsync(sourceFilePath, fileNameWithoutExtension);
+                bool isExternal = MainWindow.AddonManager.IsExternalProject;
+                if (isExternal)
+                {
+                    finalPath = sourceFilePath;
+                    LogHelper.Log($"Using original path for {propertyName}: {finalPath}", LogType.Info);
+                }
+                else
+                {
+                    string suffix = propertyName switch
+                    {
+                        "FirstPersonPath" => "_firstperson",
+                        "ClothPhysicsPath" => "_cloth",
+                        _ => throw new ArgumentException($"Unknown property: {propertyName}")
+                    };
+
+                    var fileNameWithoutExtension = $"{SelectedDraw.Id}{suffix}";
+                    finalPath = await FileHelper.CopyToProjectAssetsWithReplaceAsync(sourceFilePath, fileNameWithoutExtension);
+                    LogHelper.Log($"Copied {propertyName} file to project assets: {finalPath}", LogType.Info);
+                }
 
                 if (propertyName == "FirstPersonPath")
                 {
-                    SelectedDraw.FirstPersonPath = relativePath;
+                    SelectedDraw.FirstPersonPath = finalPath;
                 }
                 else if (propertyName == "ClothPhysicsPath")
                 {
-                    SelectedDraw.ClothPhysicsPath = relativePath;
+                    SelectedDraw.ClothPhysicsPath = finalPath;
                 }
 
                 SaveHelper.SetUnsavedChanges(true);
-                LogHelper.Log($"Copied {propertyName} file to project assets: {relativePath}", LogType.Info);
-                return relativePath;
             }
             catch (Exception ex)
             {
-                LogHelper.Log($"Failed to copy {propertyName} file to project assets: {ex.Message}. Using original path.", LogType.Warning);
+                LogHelper.Log($"Failed to process {propertyName} file: {ex.Message}. Using original path.", LogType.Warning);
                 
                 if (propertyName == "FirstPersonPath")
                 {
@@ -425,7 +431,6 @@ namespace grzyClothTool.Controls
                 }
                 
                 SaveHelper.SetUnsavedChanges(true);
-                return null;
             }
         }
 
@@ -590,7 +595,7 @@ namespace grzyClothTool.Controls
         }
 
 
-        private void AddTexture_Click(object sender, RoutedEventArgs e)
+        private async void AddTexture_Click(object sender, RoutedEventArgs e)
         {
             // calculate remaining texures that can be added
             int remainingTextures = GlobalConstants.MAX_DRAWABLE_TEXTURES - SelectedDraw.Textures.Count;
@@ -610,6 +615,8 @@ namespace grzyClothTool.Controls
             if (files.ShowDialog() == true)
             {
                 var sel = SelectedDraw;
+                bool isExternal = MainWindow.AddonManager.IsExternalProject;
+                
                 foreach (var file in files.FileNames)
                 {
                     // check if we are within the limit
@@ -619,9 +626,29 @@ namespace grzyClothTool.Controls
                         Show($"Reached the limit of {GlobalConstants.MAX_DRAWABLE_TEXTURES} textures. Last added texture: {Path.GetFileName(file)}.", "Info", CustomMessageBoxButtons.OKOnly, CustomMessageBoxIcon.Warning);
                         LogHelper.Log($"Reached the limit of {GlobalConstants.MAX_DRAWABLE_TEXTURES} textures. Last added texture: {Path.GetFileName(file)}.", LogType.Warning);
                         break;
-
                     }
-                    var gtxt = new GTexture(Guid.Empty, file, sel.TypeNumeric, sel.Number, sel.Textures.Count, sel.HasSkin, sel.IsProp);
+
+                    string texturePath;
+                    var textureGuid = Guid.NewGuid();
+                    
+                    if (isExternal)
+                    {
+                        texturePath = file;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            texturePath = await FileHelper.CopyToProjectAssetsAsync(file, textureGuid.ToString());
+                        }
+                        catch (Exception ex)
+                        {
+                            LogHelper.Log($"Failed to copy texture to project assets: {ex.Message}. Using original path.", LogType.Warning);
+                            texturePath = file;
+                        }
+                    }
+                    
+                    var gtxt = new GTexture(textureGuid, texturePath, sel.TypeNumeric, sel.Number, sel.Textures.Count, sel.HasSkin, sel.IsProp);
                     gtxt.LoadThumbnailAsync();
                     sel.Textures.Add(gtxt);
 
@@ -870,6 +897,8 @@ namespace grzyClothTool.Controls
 
                 var sel = SelectedDraw;
                 int addedCount = 0;
+                bool isExternal = MainWindow.AddonManager.IsExternalProject;
+                
                 foreach (var file in accessibleFiles)
                 {
                     if (remainingTextures <= 0)
@@ -878,7 +907,27 @@ namespace grzyClothTool.Controls
                         break;
                     }
 
-                    var gtxt = new GTexture(Guid.Empty, file, sel.TypeNumeric, sel.Number, sel.Textures.Count, sel.HasSkin, sel.IsProp);
+                    string texturePath;
+                    var textureGuid = Guid.NewGuid();
+                    
+                    if (isExternal)
+                    {
+                        texturePath = file;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            texturePath = await FileHelper.CopyToProjectAssetsAsync(file, textureGuid.ToString());
+                        }
+                        catch (Exception ex)
+                        {
+                            LogHelper.Log($"Failed to copy texture to project assets: {ex.Message}. Using original path.", LogType.Warning);
+                            texturePath = file;
+                        }
+                    }
+
+                    var gtxt = new GTexture(textureGuid, texturePath, sel.TypeNumeric, sel.Number, sel.Textures.Count, sel.HasSkin, sel.IsProp);
                     gtxt.LoadThumbnailAsync();
                     sel.Textures.Add(gtxt);
 

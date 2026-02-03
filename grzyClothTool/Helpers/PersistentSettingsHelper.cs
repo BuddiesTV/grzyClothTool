@@ -110,7 +110,7 @@ public class PersistentSettingsHelper
     }
 
 
-    public void AddRecentProject(string filePath, string projectName, int drawableCount, int addonCount)
+    public void AddRecentProject(string filePath, string projectName, int drawableCount, int addonCount, bool isExternal = false)
     {
         var recentProjects = RecentlyOpenedProjects;
         
@@ -122,7 +122,8 @@ public class PersistentSettingsHelper
             ProjectName = projectName,
             LastModified = DateTime.Now,
             DrawableCount = drawableCount,
-            AddonCount = addonCount
+            AddonCount = addonCount,
+            IsExternal = isExternal
         });
         
         if (recentProjects.Count > 3)
@@ -166,4 +167,5 @@ public class RecentProject
     public DateTime LastModified { get; set; }
     public int DrawableCount { get; set; }
     public int AddonCount { get; set; }
+    public bool IsExternal { get; set; }
 }

@@ -286,10 +286,13 @@ public static class FileHelper
         var drawableHasSkin = drawableRaceSuffix == "r";
 
         string drawablePath;
-        bool copyToProject = SettingsHelper.Instance.CopyFilesToProject;
-        if (copyToProject)
+        bool isExternal = MainWindow.AddonManager.IsExternalProject;
+        if (isExternal)
         {
-            // Copy drawable file to project assets and get relative path
+            drawablePath = filePath;
+        }
+        else
+        {
             try
             {
                 drawablePath = await CopyToProjectAssetsAsync(filePath, drawableGuid.ToString());
@@ -300,10 +303,6 @@ public static class FileHelper
                 drawablePath = filePath; // Fallback to original path
             }
         }
-        else
-        {
-            drawablePath = filePath;
-        }
 
         // Process texture files
         var texturesList = new List<(string path, int txtNumber)>();
@@ -311,7 +310,11 @@ public static class FileHelper
         {
             var texturePath = matchingTextures[txtNumber];
             
-            if (copyToProject)
+            if (isExternal)
+            {
+                texturesList.Add((texturePath, txtNumber));
+            }
+            else
             {
                 var textureGuid = Guid.NewGuid();
                 try
@@ -324,10 +327,6 @@ public static class FileHelper
                     LogHelper.Log($"Failed to copy texture to project assets: {ex.Message}. Using original path.", LogType.Warning);
                     texturesList.Add((texturePath, txtNumber)); // Fallback to original path
                 }
-            }
-            else
-            {
-                texturesList.Add((texturePath, txtNumber));
             }
         }
 

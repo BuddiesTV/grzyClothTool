@@ -61,6 +61,12 @@ namespace grzyClothTool.Models
 
         public string ProjectName { get; set; }
 
+        /// <summary>
+        /// When true, files remain in their original external locations
+        /// When false (default), files are copied to the project folder
+        /// </summary>
+        public bool IsExternalProject { get; set; }
+
         [JsonInclude]
         private string SavedAt => DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss");
 
@@ -354,16 +360,23 @@ namespace grzyClothTool.Models
                         
                         if (foundDrawable != null)
                         {
-                            try
+                            if (IsExternalProject)
                             {
-                                var firstPersonFileNameWithoutExtension = $"{foundDrawable.Id}_firstperson";
-                                var firstPersonRelativePath = await FileHelper.CopyToProjectAssetsWithReplaceAsync(filePath, firstPersonFileNameWithoutExtension);
-                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.FirstPersonPath = firstPersonRelativePath);
-                            }
-                            catch (Exception ex)
-                            {
-                                LogHelper.Log($"Failed to copy first person file to project assets: {ex.Message}. Using original path.", Views.LogType.Warning);
                                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.FirstPersonPath = filePath);
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    var firstPersonFileNameWithoutExtension = $"{foundDrawable.Id}_firstperson";
+                                    var firstPersonRelativePath = await FileHelper.CopyToProjectAssetsWithReplaceAsync(filePath, firstPersonFileNameWithoutExtension);
+                                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.FirstPersonPath = firstPersonRelativePath);
+                                }
+                                catch (Exception ex)
+                                {
+                                    LogHelper.Log($"Failed to copy first person file to project assets: {ex.Message}. Using original path.", Views.LogType.Warning);
+                                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.FirstPersonPath = filePath);
+                                }
                             }
                         }
                         else
@@ -395,16 +408,23 @@ namespace grzyClothTool.Models
                     }
                     if (foundDrawable != null)
                     {
-                        try
+                        if (IsExternalProject)
                         {
-                            var physicsFileNameWithoutExtension = $"{foundDrawable.Id}_cloth";
-                            var physicsRelativePath = await FileHelper.CopyToProjectAssetsWithReplaceAsync(filePath, physicsFileNameWithoutExtension);
-                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.ClothPhysicsPath = physicsRelativePath);
-                        }
-                        catch (Exception ex)
-                        {
-                            LogHelper.Log($"Failed to copy cloth physics file to project assets: {ex.Message}. Using original path.", Views.LogType.Warning);
                             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.ClothPhysicsPath = filePath);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                var physicsFileNameWithoutExtension = $"{foundDrawable.Id}_cloth";
+                                var physicsRelativePath = await FileHelper.CopyToProjectAssetsWithReplaceAsync(filePath, physicsFileNameWithoutExtension);
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.ClothPhysicsPath = physicsRelativePath);
+                            }
+                            catch (Exception ex)
+                            {
+                                LogHelper.Log($"Failed to copy cloth physics file to project assets: {ex.Message}. Using original path.", Views.LogType.Warning);
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => foundDrawable.ClothPhysicsPath = filePath);
+                            }
                         }
                     }
                     else

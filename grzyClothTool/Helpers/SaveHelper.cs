@@ -18,8 +18,35 @@ public class SaveFile
     public DateTime SaveDate { get; set; }
 }
 
-public static class SaveHelper
-{
+    public static class SaveHelper
+    {
+        public const string AutoSaveFileName = "autosave.json";
+        public const string AutoSaveExternalFileName = "autosave.external.json";
+        public static string GetSaveFileName(bool isExternalProject)
+        {
+            return isExternalProject ? AutoSaveExternalFileName : AutoSaveFileName;
+        }
+        
+        public static bool ProjectExists(string mainProjectsFolder, string projectName, out bool isExternal)
+        {
+            isExternal = false;
+            
+            if (string.IsNullOrEmpty(mainProjectsFolder) || string.IsNullOrEmpty(projectName))
+                return false;
+                
+            var projectPath = Path.Combine(mainProjectsFolder, projectName.Trim());
+            
+            if (File.Exists(Path.Combine(projectPath, AutoSaveFileName)))
+                return true;
+                
+            if (File.Exists(Path.Combine(projectPath, AutoSaveExternalFileName)))
+            {
+                isExternal = true;
+                return true;
+            }
+            
+            return false;
+        }
 
     public static string SavesPath { get; private set; }
     private static Timer _timer;
@@ -112,6 +139,7 @@ public static class SaveHelper
             {
                 var mainProjectsFolder = PersistentSettingsHelper.Instance.MainProjectsFolder;
                 var projectName = MainWindow.AddonManager.ProjectName;
+                var isExternalProject = MainWindow.AddonManager.IsExternalProject;
 
                 if (!string.IsNullOrEmpty(mainProjectsFolder) && 
                     !string.IsNullOrEmpty(projectName) && 
@@ -120,7 +148,8 @@ public static class SaveHelper
                     var projectFolder = Path.Combine(mainProjectsFolder, projectName);
                     Directory.CreateDirectory(projectFolder);
 
-                    var autoSavePath = Path.Combine(projectFolder, "autosave.json");
+                    var saveFileName = GetSaveFileName(isExternalProject);
+                    var autoSavePath = Path.Combine(projectFolder, saveFileName);
                     await File.WriteAllTextAsync(autoSavePath, json);
 
                     LogHelper.Log($"Auto-saved to {autoSavePath} in {timer.ElapsedMilliseconds}ms");
@@ -190,6 +219,11 @@ public static class SaveHelper
             var json = await File.ReadAllTextAsync(filePath);
             var addonManager = JsonSerializer.Deserialize<AddonManager>(json, SerializerOptions) ?? throw new InvalidOperationException("Failed to deserialize save file.");
 
+            var fileName = Path.GetFileName(filePath);
+            var isExternalFromFileName = fileName.Equals(AutoSaveExternalFileName, StringComparison.OrdinalIgnoreCase);
+            
+            var isExternalProject = addonManager.IsExternalProject || isExternalFromFileName;
+
             foreach (var addon in addonManager.Addons)
             {
                 foreach (var drawable in addon.Drawables)
@@ -208,6 +242,7 @@ public static class SaveHelper
             }
 
             MainWindow.AddonManager.ProjectName = addonManager.ProjectName;
+            MainWindow.AddonManager.IsExternalProject = isExternalProject;
 
             MainWindow.AddonManager.Groups.Clear();
             if (addonManager.Groups != null)
@@ -234,7 +269,8 @@ public static class SaveHelper
                 filePath,
                 addonManager.ProjectName ?? Path.GetFileNameWithoutExtension(filePath),
                 drawableCount,
-                addonCount
+                addonCount,
+                isExternal: isExternalProject
             );
 
             LogHelper.Log("Scanning project for duplicate drawables...");

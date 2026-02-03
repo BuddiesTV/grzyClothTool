@@ -43,7 +43,7 @@
                        FontSize="12"
                        Foreground="{DynamicResource Brush700}"
                        Margin="0,0,0,5">
-                <Run Text="Choose a MAIN folder where ALL your clothing projects will be stored."/>
+                <Run Text="Choose a MAIN folder where ALL self-contained projects will be stored."/>
                 <LineBreak/>
                 <Run Text="Example: " FontWeight="SemiBold"/>
                 <Run Text="C:\grzyClothTool Projects"/>

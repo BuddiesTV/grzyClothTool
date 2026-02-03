@@ -260,6 +260,7 @@ namespace grzyClothTool
 
             AddonManager.Addons.Clear();
             AddonManager.ProjectName = string.Empty;
+            AddonManager.IsExternalProject = false;
             AddonManager.Groups.Clear();
             AddonManager.Tags.Clear();
             AddonManager.MoveMenuItems.Clear();
@@ -299,38 +300,136 @@ namespace grzyClothTool
                 Filter = "Meta files (*.meta)|*.meta"
             };
 
-            if (metaFiles.ShowDialog() == true)
+            if (metaFiles.ShowDialog() != true)
             {
-                ProgressHelper.Start("Started loading addon");
-
-                // Opening existing addon, should clear everything and add new opened ones
-                AddonManager.Addons = [];
-                DuplicateDetector.Clear();
-                foreach (var dir in metaFiles.FileNames)
-                {
-                    using (var reader = new StreamReader(dir))
-                    {
-                        string firstLine = await reader.ReadLineAsync();
-                        string secondLine = await reader.ReadLineAsync();
-
-                        //Check two first lines if it contains "ShopPedApparel"
-                        if ((firstLine == null || !firstLine.Contains("ShopPedApparel")) &&
-                            (secondLine == null || !secondLine.Contains("ShopPedApparel")))
-                        {
-                            LogHelper.Log($"Skipped file {dir} as it is probably not a correct .meta file");
-                            return false;
-                        }
-                    }
-
-                    await AddonManager.LoadAddon(dir, shouldSetProjectName);
-                }
-
-                ProgressHelper.Stop("Addon loaded in {0}", true);
-                SaveHelper.SetUnsavedChanges(true);
-                return true;
+                return false;
             }
 
-            return false;
+            var validMetaFiles = new List<string>();
+            var extractedProjectNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int totalDrawableCount = 0;
+            string suggestedProjectName = string.Empty;
+
+            foreach (var dir in metaFiles.FileNames)
+            {
+                using (var reader = new StreamReader(dir))
+                {
+                    string firstLine = await reader.ReadLineAsync();
+                    string secondLine = await reader.ReadLineAsync();
+
+                    if ((firstLine == null || !firstLine.Contains("ShopPedApparel")) &&
+                        (secondLine == null || !secondLine.Contains("ShopPedApparel")))
+                    {
+                        LogHelper.Log($"Skipped file {dir} as it is probably not a correct .meta file");
+                        continue;
+                    }
+                }
+
+                validMetaFiles.Add(dir);
+
+                var addonName = Path.GetFileNameWithoutExtension(dir);
+                string extractedName;
+                
+                if (addonName.StartsWith("mp_m_freemode_01_", StringComparison.OrdinalIgnoreCase))
+                {
+                    extractedName = addonName["mp_m_freemode_01_".Length..];
+                }
+                else if (addonName.StartsWith("mp_f_freemode_01_", StringComparison.OrdinalIgnoreCase))
+                {
+                    extractedName = addonName["mp_f_freemode_01_".Length..];
+                }
+                else if (addonName.StartsWith("mp_m_", StringComparison.OrdinalIgnoreCase))
+                {
+                    extractedName = addonName["mp_m_".Length..];
+                }
+                else if (addonName.StartsWith("mp_f_", StringComparison.OrdinalIgnoreCase))
+                {
+                    extractedName = addonName["mp_f_".Length..];
+                }
+                else
+                {
+                    extractedName = addonName;
+                }
+                
+                extractedProjectNames.Add(extractedName);
+
+                var dirPath = Path.GetDirectoryName(dir);
+                var addonFileName = Path.GetFileNameWithoutExtension(dir);
+                string genderPart = addonFileName.Contains("mp_m_freemode_01") ? "mp_m_freemode_01" : "mp_f_freemode_01";
+                string addonNameWithoutGender = addonFileName.Replace(genderPart, "").TrimStart('_');
+                
+                var yddFiles = await Task.Run(() =>
+                {
+                    string pattern = $@"^{genderPart}(_p)?.*?{System.Text.RegularExpressions.Regex.Escape(addonNameWithoutGender)}\^";
+                    var compiledPattern = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+                    
+                    return Directory.GetFiles(dirPath, "*.ydd", SearchOption.AllDirectories)
+                        .Where(f => compiledPattern.IsMatch(Path.GetFileName(f)))
+                        .Count();
+                });
+                
+                totalDrawableCount += yddFiles;
+            }
+
+            if (validMetaFiles.Count == 0)
+            {
+                Controls.CustomMessageBox.Show("No valid .meta files were selected.", "Error", Controls.CustomMessageBox.CustomMessageBoxButtons.OKOnly, Controls.CustomMessageBox.CustomMessageBoxIcon.Error);
+                return false;
+            }
+
+            if (extractedProjectNames.Count == 1)
+            {
+                suggestedProjectName = extractedProjectNames.First();
+            }
+            else if (extractedProjectNames.Count > 1)
+            {
+                var names = extractedProjectNames.ToList();
+                var commonPrefix = FindCommonPrefix(names);
+                
+                if (!string.IsNullOrEmpty(commonPrefix) && commonPrefix.Length >= 3)
+                {
+                    suggestedProjectName = commonPrefix.TrimEnd('_');
+                }
+                else
+                {
+                    suggestedProjectName = names.First();
+                }
+            }
+
+            if (totalDrawableCount == 0)
+            {
+                Controls.CustomMessageBox.Show(
+                    "No drawable files (.ydd) were found for the selected .meta file(s).\n\n" +
+                    "Please make sure the .ydd files are in the same directory or subdirectories as the .meta file.",
+                    "No Drawables Found", 
+                    Controls.CustomMessageBox.CustomMessageBoxButtons.OKOnly, 
+                    Controls.CustomMessageBox.CustomMessageBoxIcon.Warning);
+                return false;
+            }
+
+            var dialog = ProjectSetupDialog.ShowForOpenAddon(this, suggestedProjectName, totalDrawableCount, validMetaFiles.Count);
+            if (!dialog.Confirmed)
+            {
+                return false;
+            }
+
+            ProgressHelper.Start("Started loading addon");
+
+            AddonManager.Addons = [];
+            AddonManager.IsExternalProject = !dialog.IsSelfContained;
+            DuplicateDetector.Clear();
+
+            foreach (var metaFile in validMetaFiles)
+            {
+                await AddonManager.LoadAddon(metaFile, shouldSetProjectName);
+            }
+
+            AddonManager.ProjectName = dialog.ProjectName;
+
+            var projectType = dialog.IsSelfContained ? "Self-contained" : "External";
+            ProgressHelper.Stop($"{projectType} addon loaded in {{0}}", true);
+            SaveHelper.SetUnsavedChanges(true);
+            return true;
         }
 
         public async Task AddAddonAsync(bool shouldSetProjectName = false)
@@ -534,6 +633,29 @@ namespace grzyClothTool
             {
                 DockManager.Theme = isDarkMode ? new Vs2013DarkTheme() : new Vs2013LightTheme();
             }
+        }
+
+        private static string FindCommonPrefix(List<string> strings)
+        {
+            if (strings == null || strings.Count == 0)
+                return string.Empty;
+
+            if (strings.Count == 1)
+                return strings[0];
+
+            var prefix = strings[0];
+            
+            for (int i = 1; i < strings.Count; i++)
+            {
+                while (!strings[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    prefix = prefix[..^1];
+                    if (string.IsNullOrEmpty(prefix))
+                        return string.Empty;
+                }
+            }
+
+            return prefix;
         }
     }
 }

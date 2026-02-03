@@ -315,101 +315,60 @@ namespace grzyClothTool.Views
                     return;
                 }
 
-                bool nameAccepted = false;
-                string projectName = string.Empty;
-
-                while (!nameAccepted)
+                var dialog = ProjectSetupDialog.ShowForNewProject(Window.GetWindow(this));
+                if (!dialog.Confirmed)
                 {
-                    var (result, textBoxValue) = Show("Choose a name for your project", 
-                                                       "Project Name", 
-                                                       CustomMessageBoxButtons.OKCancel, 
-                                                       CustomMessageBoxIcon.None, 
-                                                       true);
-
-                    if (result != CustomMessageBoxResult.OK || string.IsNullOrWhiteSpace(textBoxValue))
-                    {
-                        return;
-                    }
-
-                    projectName = textBoxValue.Trim();
-
-                    if (projectName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-                    {
-                        Show("Project name contains invalid characters. Please choose a different name.", 
-                             "Invalid Name", 
-                             CustomMessageBoxButtons.OKOnly, 
-                             CustomMessageBoxIcon.Warning);
-                        continue;
-                    }
-
-                    var projectFolder = Path.Combine(mainProjectsFolder, projectName);
-                    if (Directory.Exists(projectFolder))
-                    {
-                        var autoSavePath = Path.Combine(projectFolder, "autosave.json");
-                        if (File.Exists(autoSavePath))
-                        {
-                            var openExisting = Show(
-                                $"A project with the name '{projectName}' already exists.\n\nDo you want to open it instead?",
-                                "Project Exists",
-                                CustomMessageBoxButtons.YesNo,
-                                CustomMessageBoxIcon.Question);
-
-                            if (openExisting == CustomMessageBoxResult.Yes)
-                            {
-                                await SaveHelper.LoadSaveFileAsync(autoSavePath);
-                                LoadRecentProjects();
-                                MainWindow.NavigationHelper.Navigate("Project");
-                                return;
-                            }
-                            else
-                            {
-                                continue;
-                            }
-                        }
-                        else
-                        {
-                            var useFolder = Show(
-                                $"A folder named '{projectName}' already exists but contains no save file.\n\nDo you want to create a new project in this folder?",
-                                "Folder Exists",
-                                CustomMessageBoxButtons.YesNo,
-                                CustomMessageBoxIcon.Question);
-
-                            if (useFolder == CustomMessageBoxResult.Yes)
-                            {
-                                nameAccepted = true;
-                            }
-                            else
-                            {
-                                continue;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        nameAccepted = true;
-                    }
+                    return;
                 }
 
-                var finalProjectFolder = Path.Combine(mainProjectsFolder, projectName);
-                Directory.CreateDirectory(finalProjectFolder);
+                var projectName = dialog.ProjectName.Trim();
+                var isExternal = !dialog.IsSelfContained;
 
-                var assetsFolder = Path.Combine(finalProjectFolder, GlobalConstants.ASSETS_FOLDER_NAME);
-                Directory.CreateDirectory(assetsFolder);
+                if (projectName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                {
+                    Show("Project name contains invalid characters. Please choose a different name.", 
+                         "Invalid Name", 
+                         CustomMessageBoxButtons.OKOnly, 
+                         CustomMessageBoxIcon.Warning);
+                    return;
+                }
 
+                var projectFolder = Path.Combine(mainProjectsFolder, projectName);
+
+                if (Directory.Exists(projectFolder))
+                {
+                    ClearProjectFolder(projectFolder);
+                }
+
+                Directory.CreateDirectory(projectFolder);
+                if (!isExternal)
+                {
+                    var assetsFolder = Path.Combine(projectFolder, GlobalConstants.ASSETS_FOLDER_NAME);
+                    Directory.CreateDirectory(assetsFolder);
+                }
+
+                MainWindow.AddonManager.Addons.Clear();
+                MainWindow.AddonManager.Groups.Clear();
+                MainWindow.AddonManager.Tags.Clear();
+                
                 MainWindow.AddonManager.ProjectName = projectName;
+                MainWindow.AddonManager.IsExternalProject = isExternal;
                 MainWindow.AddonManager.CreateAddon();
 
-                var newProjectAutoSavePath = Path.Combine(finalProjectFolder, "autosave.json");
+                var saveFileName = SaveHelper.GetSaveFileName(isExternal);
+                var newProjectAutoSavePath = Path.Combine(projectFolder, saveFileName);
                 PersistentSettingsHelper.Instance.AddRecentProject(
                     newProjectAutoSavePath,
                     projectName,
                     drawableCount: 0,
-                    addonCount: 1
+                    addonCount: 1,
+                    isExternal: isExternal
                 );
                 
                 LoadRecentProjects();
 
-                LogHelper.Log($"Created new project: {projectName} at {finalProjectFolder}");
+                var projectType = isExternal ? "External" : "Self-contained";
+                LogHelper.Log($"Created new {projectType} project: {projectName} at {projectFolder}");
                 MainWindow.NavigationHelper.Navigate("Project");
             }
             catch (Exception ex)
@@ -542,6 +501,41 @@ namespace grzyClothTool.Views
         private void Close_Click(object sender, RoutedEventArgs e)
         {
             Application.Current.MainWindow.Close();
+        }
+
+
+        private static void ClearProjectFolder(string projectFolder)
+        {
+            try
+            {
+                var saveFiles = new[] 
+                { 
+                    Path.Combine(projectFolder, SaveHelper.AutoSaveFileName),
+                    Path.Combine(projectFolder, SaveHelper.AutoSaveExternalFileName)
+                };
+
+                foreach (var saveFile in saveFiles)
+                {
+                    if (File.Exists(saveFile))
+                    {
+                        File.Delete(saveFile);
+                        LogHelper.Log($"Deleted old save file: {saveFile}");
+                    }
+                }
+
+                var assetsFolder = Path.Combine(projectFolder, GlobalConstants.ASSETS_FOLDER_NAME);
+                if (Directory.Exists(assetsFolder))
+                {
+                    Directory.Delete(assetsFolder, recursive: true);
+                    LogHelper.Log($"Deleted old assets folder: {assetsFolder}");
+                }
+
+                LogHelper.Log($"Cleared project folder for overwrite: {projectFolder}");
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Log($"Warning: Could not fully clear project folder: {ex.Message}", LogType.Warning);
+            }
         }
 
         protected virtual void OnPropertyChanged(string propertyName)
