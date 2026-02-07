@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Threading.Tasks;
 using System;
+using grzyClothTool.Models.Texture;
 
 namespace grzyClothTool.Views
 {
@@ -236,6 +237,103 @@ namespace grzyClothTool.Views
                     }
                 }
             }
+        }
+        
+        private int MergeGroup(DuplicateGroupViewModel group)
+        {
+            if (group.Items.Count <= 1)
+                return 0;
+
+            var targetVm = group.Items.First();
+            if (targetVm.Item is not GDrawable targetDrawable)
+                return 0;
+
+            int mergedCount = 0;
+
+            var itemsToMerge = group.Items.Skip(1).ToList();
+
+            foreach (var vm in itemsToMerge)
+            {
+                if (vm.Item is GDrawable drawable)
+                {
+                    foreach (var texture in drawable.Textures)
+                    {
+                        var textureGuid = Guid.NewGuid();
+                        var gtxt = new GTexture(textureGuid, texture.FullFilePath, targetDrawable.TypeNumeric, targetDrawable.Number, targetDrawable.Textures.Count, targetDrawable.HasSkin, targetDrawable.IsProp);
+                        gtxt.LoadThumbnailAsync();
+                        targetDrawable.Textures.Add(gtxt);
+                    }
+
+                    DeleteSingleItem(vm);
+                    mergedCount++;
+                }
+            }
+
+            return mergedCount;
+        }
+
+        private void MergeAllGlobal_Click(object sender, RoutedEventArgs e)
+        {
+            if (_groups.Count == 0)
+                return;
+
+            var totalItemsToMerge = _groups.Sum(g => Math.Max(0, g.Items.Count - 1));
+
+            var result = Controls.CustomMessageBox.Show(
+                $"This will merge & delete {totalItemsToMerge} duplicate items across all groups.\n\nAre you sure?",
+                "Confirm Global Merge",
+                Controls.CustomMessageBox.CustomMessageBoxButtons.OKCancel,
+                Controls.CustomMessageBox.CustomMessageBoxIcon.Warning);
+
+            if (result != Controls.CustomMessageBox.CustomMessageBoxResult.OK)
+                return;
+
+            int mergedCount = 0;
+
+            foreach (var group in _groups.ToList())
+            {
+                mergedCount += MergeGroup(group);
+            }
+
+            SaveHelper.SetUnsavedChanges(true);
+            LoadAllDuplicates();
+
+            Controls.CustomMessageBox.Show(
+                $"Merged {mergedCount} duplicate items!",
+                "Success",
+                Controls.CustomMessageBox.CustomMessageBoxButtons.OKOnly,
+                Controls.CustomMessageBox.CustomMessageBoxIcon.Information);
+
+            if (_groups.Count == 0)
+                Close();
+        }
+
+        private void MergeAll_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not System.Windows.Controls.Button button ||
+                button.Tag is not DuplicateGroupViewModel group ||
+                group.Items.Count <= 1)
+                return;
+
+            var result = Controls.CustomMessageBox.Show(
+                $"This will merge & delete {group.Items.Count - 1} duplicate items from this group.\n\nAre you sure?",
+                "Confirm Bulk Merge",
+                Controls.CustomMessageBox.CustomMessageBoxButtons.OKCancel,
+                Controls.CustomMessageBox.CustomMessageBoxIcon.Warning);
+
+            if (result != Controls.CustomMessageBox.CustomMessageBoxResult.OK)
+                return;
+
+            var mergedCount = MergeGroup(group);
+
+            SaveHelper.SetUnsavedChanges(true);
+            LoadAllDuplicates();
+
+            Controls.CustomMessageBox.Show(
+                $"Merged {mergedCount} duplicate items!",
+                "Success",
+                Controls.CustomMessageBox.CustomMessageBoxButtons.OKOnly,
+                Controls.CustomMessageBox.CustomMessageBoxIcon.Information);
         }
 
         private void DeleteGroupExceptFirst_Click(object sender, RoutedEventArgs e)
